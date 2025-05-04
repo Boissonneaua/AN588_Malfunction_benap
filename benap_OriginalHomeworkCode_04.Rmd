@@ -2,14 +2,27 @@
 title: "benap_OriginalHomeworkCode_04"
 author: "Ben Peters"
 date: "2025-03-20"
-output: html_document
+output: 
+  html_document: 
+    toc: TRUE
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## 1
+# Load Libraries
+
+```{r}
+library(curl)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggpubr)
+```
+
+
+# Question 1
 
 Write a simple R function, Z.prop.test(), that can perform one- or two-sample Z-tests for proportion data, using the following guidelines:
 
@@ -21,8 +34,152 @@ Write a simple R function, Z.prop.test(), that can perform one- or two-sample Z-
     
     
 ```{r}
-Z.prop.test(p1, n1) <- function {
+Z.prop.test <- function(p0, p1, n1, p2 = NULL, n2 = NULL, alternative = "two.sided", conf.level = 0.95) {
+  if(is.null(p2) | (is.null(n2))){ #one-sample test
+    if((n1*p0 < 5)|(n1*(1-p0) < 5)){ #normal assumption check
+      warning("Warning, check validity of normal approximation")
+    }
+    print("One-sample test")
+    pse <- sqrt(p0*(1-p0)/n1) #calculate standard error
+    Z = (p1-p0)/pse
+    crit <- qnorm(conf.level+((1-conf.level)/2))
+    ci_lower <- p1 - crit * sqrt(p1*(1-p1)/n1)
+    ci_upper <- p1 + crit * sqrt(p1*(1-p1)/n1)
+  }else { #two-sample test
+    if((n1*p0 < 5)|(n1*(1-p0) < 5)|(n2*p0 < 5)|(n2*(1-p0) < 5)){ #normal assumption check
+      warning("Warning, check validity of normal approximation")
+    }
+    print("Two-sample test")
+    pstar <- ((p1*n1)+(p2*n2))/(n1+n2) #calculate pooled proportion
+    Z = (p2-p1-0)/sqrt(pstar*(1-pstar)*(1/n1 + 1/n2))
+    crit <- qnorm(conf.level+((1-conf.level)/2))
+    ci_lower <- (p2-p1) - crit * sqrt((p1*(1-p1)/n1)+(p2*(1-p2)/n2))
+    ci_upper <- (p2-p1) + crit * sqrt((p1*(1-p1)/n1)+(p2*(1-p2)/n2))
+  }
+  if(alternative == "two.sided"){
+    p <- 2*pnorm(Z, lower.tail = TRUE)
+  }else if(alternative == "greater"){
+    p <- pnorm(Z, lower.tail = FALSE)
+  }else if(alternative == "less"){
+    p <- pnorm(Z, lower.tail = TRUE)
+  }else{
+    stop("Error: unsupported alternative value, choose two.sided, greater, or less")
+  }
   
+  ci <- c(ci_lower, ci_upper)
+  return(list(Z.val = Z, P.val = p, Conf.Int = ci))
   }
 ```
+
+```{r}
+Z.prop.test(0.8,0.5,30, alternative = "less")
+```
+
+
+# Question 2
+
+The dataset from Kamilar and Cooper has in it a large number of variables related to life history and body size. For this exercise, the end aim is to fit a simple linear regression model to predict longevity (MaxLongevity_m) measured in months from species’ brain size (Brain_Size_Species_Mean) measured in grams. Do the following for both longevity~brain size and log(longevity)~log(brain size):
+- Fit the regression model and, using {ggplot2}, produce a scatterplot with the fitted line superimposed upon the data. Append the the fitted model equation to your plot (HINT: use the function geom_text()).
+- Identify and interpret the point estimate of the slope (β1), as well as the outcome of the test associated with the hypotheses H0: β1 = 0; HA: β1 ≠ 0. Also, find a 90 percent CI for the slope (β1) parameter.
+- Using your model, add lines for the 90 percent confidence and prediction interval bands on the plot and add a legend to differentiate between the lines.
+- Produce a point estimate and associated 90 percent PI for the longevity of a species whose brain weight is 800 gm.
+- Do you trust the model to predict observations accurately for this value of the explanatory variable? Why or why not?
+- Looking at your two models, which do you think is better? Why?
+
+```{r}
+# Load in data
+kamcoop_data <- curl("https://raw.githubusercontent.com/fuzzyatelin/fuzzyatelin.github.io/master/AN588_Fall23/KamilarAndCooperData.csv")
+kc_df <- read.csv(kamcoop_data, header = TRUE)
+```
+
+```{r}
+# filter out na values from relevant columns
+kc_df <- kc_df %>% 
+  drop_na(Brain_Size_Species_Mean) %>% 
+  drop_na(MaxLongevity_m)
+head(kc_df)
+```
+
+## Linear Model of non-log transformed data
+
+```{r}
+# linear model of Max Longevity and Brain Size
+mo <- lm(MaxLongevity_m ~ Brain_Size_Species_Mean, data = kc_df)
+mo
+```
+
+```{r}
+ggplot(data = kc_df, aes(x = Brain_Size_Species_Mean, y = MaxLongevity_m))+
+  geom_point()+
+  geom_smooth(method = "lm", se = F, formula = y ~ x) + #add in line from lm regression, the model here should be identical to that used above
+  stat_regline_equation(color = "blue") #added in by ggpubr, adds the regression equation automatically!
+```
+
+My interpretation of the slope is that for every increase of 1 in the brain size mean for the entire species, there is a 1.218 month increase in maximum longevity.
+
+```{r}
+mo_90ci <- confint(mo, level = 0.9) #calculate the 90% confidence interval for our slope
+mo_90ci
+```
+
+```{r}
+ggplot(data = kc_df, aes(x = Brain_Size_Species_Mean, y = MaxLongevity_m))+
+  geom_point()+
+  geom_smooth(method = "lm", level = 0.9, fill = "lightblue", formula = y ~ x) + #geom_smooth includes a confidence interval by default, I just set the level to 90% to match the above
+  stat_regline_equation(color = "blue")
+```
+
+
+```{r}
+n800 <- data.frame(Brain_Size_Species_Mean = 800)
+predict_800 <- predict(mo, newdata = n800, level = 0.90, interval = "predict")#[ ,"lwr"]
+predict_800
+```
+
+```{r}
+predict2 <- as.data.frame(predict(mo, level = 0.90, interval = "predict"))
+plus_predict <- cbind(kc_df, predict2)
+```
+```{r}
+ggplot(data = plus_predict, aes(x = Brain_Size_Species_Mean, y = MaxLongevity_m))+
+  geom_point()+
+  geom_smooth(aes(color = "Model Fit + 90% CI"), method = "lm", level = 0.9, fill = "lightblue", formula = y ~ x) +
+  stat_regline_equation(color = "blue") +
+  geom_line(aes( color = "Prediction Interval", y = lwr), linetype = "dashed")+
+  geom_line(aes(color = "Prediction Interval", y = upr), linetype = "dashed")+
+  ggtitle("Max Longevity vs Brain Size + Prediction Interval") +
+  scale_color_manual(name='Line', # manual addition of legend
+                     breaks=c("Prediction Interval", "Model Fit + 90% CI"),
+                     values=c("Prediction Interval"="darkred", "Model Fit + 90% CI"="blue"))
+```
+
+## Do the same thing but with log transformed data!
+
+```{r}
+mo2 <- lm(log(MaxLongevity_m) ~ log(Brain_Size_Species_Mean), data = kc_df)
+mo2
+```
+```{r}
+n800_log <- data.frame(Brain_Size_Species_Mean = 800)
+predict_800log <- predict(mo2, newdata = n800, level = 0.90, interval = "predict")
+predict_800log
+```
+```{r}
+predict3 <- as.data.frame(predict(mo2, level = 0.90, interval = "predict"))
+plus_predict_log <- cbind(kc_df, predict3)
+```
+```{r}
+ggplot(data = plus_predict_log, aes(x = log(Brain_Size_Species_Mean), y = log(MaxLongevity_m)))+
+  geom_point()+
+  geom_smooth(aes(color = "Model Fit + 90% CI"), method = "lm", level = 0.9, fill = "lightblue", formula = y ~ x) +
+  stat_regline_equation(color = "blue") +
+  geom_line(aes( color = "Prediction Interval", y = lwr), linetype = "dashed")+
+  geom_line(aes(color = "Prediction Interval", y = upr), linetype = "dashed")+
+  ggtitle("Log Transformed Max Longevity vs Brain Size + Prediction Interval") +
+  scale_color_manual(name='Line',
+                     breaks=c("Prediction Interval", "Model Fit + 90% CI"),
+                     values=c("Prediction Interval"="darkred", "Model Fit + 90% CI"="blue"))
+```
+
+Overall I think I would trust the log-transformed model more, as visually the regression line seems to match the data a lot more closely and the prediction intervals seem to encompass more of the points. The log transformation seems to have reduced one of the major issues in the non-log transformed linear model where the majority of the data points were clustered around the lower end of the X axis with only a few outliers present at the other end, which made me question the validity of a linear model for the non-transformed data set. The log transformation handily reduces that problem and visually appears to be closer.
 
